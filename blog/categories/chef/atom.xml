@@ -1,0 +1,1536 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+
+  <title><![CDATA[Category: Chef | A Fistful of Servers]]></title>
+  <link href="http://blog.afistfulofservers.net/blog/categories/chef/atom.xml" rel="self"/>
+  <link href="http://blog.afistfulofservers.net/"/>
+  <updated>2014-09-28T02:58:15-04:00</updated>
+  <id>http://blog.afistfulofservers.net/</id>
+  <author>
+    <name><![CDATA[Sean OMeara]]></name>
+    
+  </author>
+  <generator uri="http://octopress.org/">Octopress</generator>
+
+  
+  <entry>
+    <title type="html"><![CDATA[Promises, Lies, and Dry-Run Mode]]></title>
+    <link href="http://blog.afistfulofservers.net/post/2012/12/21/promises-lies-and-dryrun-mode/"/>
+    <updated>2012-12-21T04:21:00-05:00</updated>
+    <id>http://blog.afistfulofservers.net/post/2012/12/21/promises-lies-and-dryrun-mode</id>
+    <content type="html"><![CDATA[<h2>Introduction</h2>
+
+
+<p><img class="right <a" src="href="http://i.imgur.com/Ftyot.jpg">http://i.imgur.com/Ftyot.jpg</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>&ldquo;I need to know what this will do to my production systems before I run
+it.&rdquo; &ndash; Ask a Systems Administrator why they want dry-run mode in a
+management tool, and this is the answer you&rsquo;ll get almost every single
+time.</p>
+
+<p>Historically, we have been able to use dry-run as a risk mitigation
+strategy before applying changes to machines. Dry-run is supposed to
+report what a tool would do, so that the administrator can determine
+if it is safe to run. Unfortunately, this only works if the reporting
+can be trusted as accurate.</p>
+
+<p>In this post, I&rsquo;ll show why modern configuration management tools
+behave differently than the classical tool set, and why their dry-run
+reporting is untrustworthy. While useful for development, it should
+never be used in place of proper testing.</p>
+
+<h2> make -n </h2>
+
+
+<p><img class="left <a" src="href="http://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Ford_assembly_line_-_1913.jpg/566px-Ford_assembly_line_-_1913.jpg">http://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Ford_assembly_line_-_1913.jpg/566px-Ford_assembly_line_-_1913.jpg</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>Many tools in a sysadmin&rsquo;s belt have a dry-run mode. Common
+utilities like make, rsync, rpm, and apt all have it.  Many databases
+will let you simulate updates, and most disk utilities can show you
+changes before making them.</p>
+
+<p>The <a href=http://pubs.opengroup.org/onlinepubs/009695399/utilities/make.html">make</a>
+utility is the earliest example I can find of an automation tool with
+a dry-run option. Dry-run in <code>make -n</code> works by building a list of
+commands, then printing instead of executing them. This is useful
+because it can be trusted that <code>make</code> will always run the exact same
+list in real-run mode. Rsync and others behave the same way.</p>
+
+<p>Convergence based tools, however, don&rsquo;t build lists of commands. They
+build sets of convergent operators instead.</p>
+
+<h2> Convergent Operators, Sets and Sequence </h2>
+
+
+<p><img class="right <a" src="href="http://i.imgur.com/x3uWr.png">http://i.imgur.com/x3uWr.png</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>Convergent operators ensure state. They have a subject, and two sets of
+instructions. The first set are tests that determine if the subject is
+in the desired state, and the second set takes corrective actions if
+needed. Types are made by grouping common tests and actions. This
+allows us to talk about things like users, groups, files, and services
+abstractly.</p>
+
+<p>CFEngine promise bundles, Puppet manifests, and Chef recipes are all
+sets of these data structures. Putting them into a <a
+href="http://en.wikipedia.org/wiki/Control_theory">feedback loop</a>
+lets them cooperate over multiple runs, and enables the self-healing
+behavior that is essential when dealing with large amounts of
+complexity.</p>
+
+<p><img class="left <a" src="href="http://i.imgur.com/g4fcW.png">http://i.imgur.com/g4fcW.png</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>During each run, <em>ordered sets</em> of convergent operators are applied
+against the system. How order is determined varies from tool to tool,
+but it is ordered none the less.</p>
+
+<h2> Promises and Lies </h2>
+
+
+<p><img class="left <a" src="href="http://i.imgur.com/rUk4d.png">http://i.imgur.com/rUk4d.png</a>&#8221; width=&#8221;280&#8221;>
+CFEngine models <a href="http://en.wikipedia.org/wiki/Promise_theory">Promise Theory</a>
+as a way of doing systems management. While Puppet and Chef do not model
+promise theory explicitly, it is still useful to borrow its vocabulary
+and metaphors and think about individual, autonomous agents that
+promise to fix the things they&rsquo;re concerned with.</p>
+
+<p>When writing policy, imagine every resource statement as a simple
+little robot. When the client runs, a swarm of these robots run
+tests, interrogate package managers, inspect files, and examine
+process tables. Corrective action is taken only when necessary.</p>
+
+<p>When dealing with these agents, it can sometimes seem like they&rsquo;re
+lying to you. This raises a few questions. Why would they lie? Under
+what circumstances are they likely to lie? What exactly is a lie
+anyway?</p>
+
+<p>A <a href="http://cfengine.com/markburgess/BookOfPromises.pdf">formal</a>
+examination of promises does indeed include the notion of lies. Lies
+can be outright deceptions, which are the lies of the
+rarely-encountered Evil Robots. Lies can also be &ldquo;non-deceptions&rdquo;,
+which are the lies of occasionally-encountered Broken Robots. Most
+often though, we experience lies from the often-encountered Merely
+Mis-informed Robots.</p>
+
+<h2> The Best You Can Do </h2>
+
+
+<p><img class="left <a" src="href="http://i.imgur.com/oyf5b.png">http://i.imgur.com/oyf5b.png</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>The best you can possibly hope to do in a dry-run mode is to build the operator
+sequences, then interrogate each one about what they would do to
+repair the system at that exact moment. The problem with this is, in real-run
+mode, the <em>the system is changing between the tests</em>. Quite often, the
+results of any given test will be affected by a preceeding action.</p>
+
+<p><img class="right <a" src="href="http://i.imgur.com/uKQHY.png">http://i.imgur.com/uKQHY.png</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>Configuration operations can have rather large side effects. Sending
+signals to processes can change files on disk. Mounting a disk will
+change an entire branch of a directory tree. Packages can drop off
+one or a million different files, and will often execute pre or
+post-installation scripts. Installing the Postfix package on an Ubuntu
+system will not only write the package contents to disk, but also
+create users and disable Exim before automatically starting the service.</p>
+
+<p>Throw in some notifications and boolean checks and things can get
+really interesting.</p>
+
+<h2> Experiments in Robotics </h2>
+
+
+<p><img class="right <a" src="href="http://i.imgur.com/4ORuB.jpg">http://i.imgur.com/4ORuB.jpg</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>To experiment with dry-run mode, I wrote a Chef cookbook that
+configures a machine with initial conditions, then drops off CFEngine
+and Puppet policies for dry-running.</p>
+
+<p>Three configuration management systems, each with conflicting
+policies, wreaking havoc on a single machine sounds like a fun way to
+spend the evening. Lets get weird.</p>
+
+<p>If you already have a Ruby and Vagrant environment setup on your
+workstation and would like to follow along, feel free. Otherwise, you
+can just read the code examples by clicking on the provided links as
+we go.</p>
+
+<p>Clone out the <a href='https://github.com/someara/dry-run-lies-cookbook'>dry-run-lies</a>
+cookbook from Github, then bring up a Vagrant box with Chef.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>~/src/$ git clone &lt;a href="https://github.com/someara/dry-run-lies-cookbook">https://github.com/someara/dry-run-lies-cookbook&lt;/a> dry-run-lies
+</span><span class='line'>~/src/$ cd dry-run-lies
+</span><span class='line'>~/src/dry-run-lies$ bundle install
+</span><span class='line'>~/src/dry-run-lies$ bundle exec vagrant up
+</span><span class='line'>~/src/dry-run-lies$ bundle exec vagrant ssh</span></code></pre></td></tr></table></div></figure></p>
+
+<h2> CFEngine &#8211;dry-run </h2>
+
+
+<p>When Chef is done configuring the machine, log into it and switch to
+root. We can test the <code>/tmp/lies-1.cf</code> policy file by running <code>cf-agent</code> with the <code>-n</code> flag.</p>
+
+<p><figure class='code'><figcaption><span>CFEngine dry-run  </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>root@dry-run-lies:~# cf-agent -K -f /tmp/lies-1.cf -n
+</span><span class='line'>-> Would execute script /bin/echo hello from bundle_one. puppet_bin_does_not_exist
+</span><span class='line'> -> Need to execute /usr/bin/aptitude update&hellip;</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Dry-run mode reports that it would run an echo command in bundle_one.
+Let&rsquo;s remove <code>-n</code> and see what happens.</p>
+
+<p><figure class='code'><figcaption><span>CFEngine real-run  </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>root@dry-run-lies:~# cf-agent -K -f /tmp/lies-1.cf
+</span><span class='line'>Q: &ldquo;&hellip;/bin/echo hello&rdquo;: hello from bundle_one. puppet_bin_does_not_exist
+</span><span class='line'>I: Last 1 quoted lines were generated by promiser &ldquo;/bin/echo hello from bundle_one. puppet_bin_does_not_exist&rdquo;
+</span><span class='line'>Q: &ldquo;&hellip;/bin/echo hello&rdquo;: hello from bundle_three. puppet_bin_exists
+</span><span class='line'>I: Last 1 quoted lines were generated by promiser &ldquo;/bin/echo hello from bundle_three. puppet_bin_exists&rdquo;</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Wait a sec&hellip; What&rsquo;s all this bundle_three business? Did dry-run just
+lie to me?</p>
+
+<p>Examine the <code>lies-1.cf</code> file <a href="http://bit.ly/RVnV38">here</a>.</p>
+
+<p>The policy said three things. First, &ldquo;echo hello from bundle one if
+/usr/bin/puppet does NOT exist&rdquo;. Second, &ldquo;make sure the puppet package
+is installed&rdquo;. Third, &ldquo;echo hello from bundle three if /usr/bin/puppet
+exists.&rdquo;</p>
+
+<p>In dry-run mode, each agent was interrogated individually. This resulted
+in a report leading us to believe that only one &ldquo;echo hello&rdquo; would be
+made, when in reality, there were two.</p>
+
+<h2> Puppet &#8211;noop </h2>
+
+
+<p>Let&rsquo;s give Puppet a spin. We can test the policy at <code>/tmp/lies-1.pp</code> with the
+<code>--noop</code> flag to see what Puppet thinks it will do.</p>
+
+<p><figure class='code'><figcaption><span>Puppet dry-run  </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>root@dry-run-lies:~# puppet apply /tmp/lies-1.pp &ndash;noop
+</span><span class='line'>notice: /Stage[main]//Mount[/mnt/nfsmount]/ensure: current_value ghost, should be unmounted (noop)
+</span><span class='line'>notice: /Stage[main]//Mount[/mnt/nfsmount]: Would have triggered &lsquo;refresh&rsquo; from 1 events
+</span><span class='line'>notice: Class[Main]: Would have triggered &lsquo;refresh&rsquo; from 3 events
+</span><span class='line'>notice: Stage[main]: Would have triggered &lsquo;refresh&rsquo; from 1 events
+</span><span class='line'>notice: Finished catalog run in 0.30 seconds</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Dry-run reports that there is one resource to fix. Excellent. Let&rsquo;s
+remove the <code>--noop</code> flag and see what happens.</p>
+
+<p><figure class='code'><figcaption><span>Puppet real-run </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>root@dry-run-lies:~# puppet apply /tmp/lies-1.pp
+</span><span class='line'>notice: /Stage[main]//Mount[/mnt/nfsmount]/ensure: ensure changed &lsquo;ghost&rsquo; to &lsquo;unmounted&rsquo;
+</span><span class='line'>notice: /Stage[main]//Mount[/mnt/nfsmount]: Triggered &lsquo;refresh&rsquo; from 1 events
+</span><span class='line'>notice: /Stage[main]//File[/mnt/nfsmount/file-1]/ensure: created
+</span><span class='line'>notice: /Stage[main]//File[/mnt/nfsmount/file-2]/ensure: created
+</span><span class='line'>notice: /Stage[main]//File[/mnt/nfsmount/file-3]/ensure: created
+</span><span class='line'>notice: Finished catalog run in 4.37 seconds</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Like the CFEngine example, we have the real-run doing things that were
+not listed in the dry-run report.</p>
+
+<p>The Chef policy that set up the initial machine state mounted an NFS
+directory into <code>/mnt/nfssrv</code>. When interrogated during dry-run, the
+tests in the <code>file</code> resources saw that the files were present, so they
+did not report that they needed to be fixed. During the real-run,
+Puppet unmounts the directory, changing the view of the filesystem and
+the outcome of the tests.</p>
+
+<p>Check out the policy <a href="http://bit.ly/V87wom">here</a>.</p>
+
+<p>It should be noted that Puppet&rsquo;s resource graph model does nothing to
+enable noop functionality, nor can it affect its accuracy. It is used
+only for the purposes of ordering and ensuring non-conflicting node
+names within its model.</p>
+
+<h2> Chef &#8211;why-run </h2>
+
+
+<p>Finally, we&rsquo;ll run the original Chef policy with the <code>-W</code> flag to see if it lies like the others.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>root@dry-run-lies:~# chef-solo -c /tmp/vagrant-chef-1/solo.rb -j /tmp/vagrant-chef-1/dna.json -Fmin &ndash;why-run
+</span><span class='line'>Starting Chef Client, version 10.16.4
+</span><span class='line'>Compiling cookbooks &hellip;&hellip;.done.
+</span><span class='line'>Converging 32 resources &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;.U&hellip;&hellip;.UUUS
+</span><span class='line'>System converged.&lt;/p>
+</span><span class='line'>
+</span><span class='line'>&lt;p>resources updated this run:
+</span><span class='line'>* mount[/mnt/nfsmount]
+</span><span class='line'>- mount 127.0.0.1:/srv/nfssrv to /mnt/nfsmount&lt;/p>
+</span><span class='line'>
+</span><span class='line'>&lt;ul>
+</span><span class='line'>&lt;li>package[nmap]&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>install version 5.21-1.1ubuntu1 of package nmap&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>package[puppet]&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>remove  package puppet&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>purge  package puppet&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>package[puppet-common]&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>remove  package puppet-common&lt;/li>
+</span><span class='line'>&lt;li>purge  package puppet-common&lt;/li>
+</span><span class='line'>&lt;/ul>
+</span><span class='line'>
+</span><span class='line'>
+</span><span class='line'>&lt;p>chef client finished, 4 resources updated</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Seems legit. Let&rsquo;s remove the <code>--why-run</code> flag and do it for real.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>root@dry-run-lies:~# chef-solo -c /tmp/vagrant-chef-1/solo.rb -j /tmp/vagrant-chef-1/dna.json -Fmin
+</span><span class='line'>Starting Chef Client, version 10.16.4
+</span><span class='line'>Compiling cookbooks &hellip;&hellip;.done.
+</span><span class='line'>Converging 32 resources &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;.U&hellip;&hellip;.UUUU
+</span><span class='line'>System converged.&lt;/p>
+</span><span class='line'>
+</span><span class='line'>&lt;p>resources updated this run:
+</span><span class='line'>* mount[/mnt/nfsmount]
+</span><span class='line'>- mount 127.0.0.1:/srv/nfssrv to /mnt/nfsmount&lt;/p>
+</span><span class='line'>
+</span><span class='line'>&lt;ul>
+</span><span class='line'>&lt;li>package[nmap]&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>install version 5.21-1.1ubuntu1 of package nmap&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>package[puppet]&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>remove  package puppet&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>package[puppet-common]&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>remove  package puppet-common&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>&lt;p>execute[hack the planet]&lt;/p>&lt;/li>
+</span><span class='line'>&lt;li>execute /bin/echo HACKING THE PLANET&lt;/li>
+</span><span class='line'>&lt;/ul>
+</span><span class='line'>
+</span><span class='line'>
+</span><span class='line'>&lt;p>chef client finished, 5 resources updated</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Right. &ldquo;HACKING THE PLANET&rdquo; was definitely not in the dry-run output.
+Let&rsquo;s go figure out what happened. See the Chef policy <a href="http://bit.ly/WXr8k0">here</a>.</p>
+
+<p>Previously, our CFEngine policy had installed Puppet on the machine.
+Our Puppet policy ensured nmap was absent. Chef will install nmap, but
+only if the Puppet binary is present in /usr/bin.</p>
+
+<p>Running Chef in <code>--why-run</code> mode, the test for the <code>'package[nmap]'</code> resource
+succeeds because of the pre-conditions set up by the CFEngine policy.
+Had we not applied that policy, the <code>'execute[hack the planet]'</code>
+resource would still not have fired because nothing installs nmap
+along the way. In real-run mode, it succeeds because Chef changes the
+machine state between tests, but would have failed if we had never ran
+the Puppet policy.</p>
+
+<p>Yikes.</p>
+
+<h2> Okay, So What? </h2>
+
+
+<p>The robots were not trying to be deceptive. Each autonomous agent
+told us what it honestly thought it should do in order to fix the
+system. As far as they could see, everything was fine when we asked
+them.</p>
+
+<p>As we automate the world around us, it is important to know how the
+systems we build fail. We are going to need to fix them, after all.
+It is even more important to know how our machines lie to us. The last
+thing we need is an army of lying robots wandering around.</p>
+
+<p>Luckily, there are a number of techniques for testing and introducing
+change that can be used to help ensure nothing bad happens.</p>
+
+<h2> Keeping the Machines Honest </h2>
+
+
+<p><img class="right <a" src="href="http://farm8.staticflickr.com/7171/6809694353_7bdba3a38a_n.jpg">http://farm8.staticflickr.com/7171/6809694353_7bdba3a38a_n.jpg</a>&#8221; width=&#8221;280&#8221;></p>
+
+<p>Testing needs to be about observation, not interrogation. In each
+case, the system converged to the policy, regardless of whether
+dry-run got confused or not. If we can setup up test machines that
+reproduce a system&rsquo;s state, we can real-run the policy and observe the
+behavior. Integration tests can then be written to ensure that the
+policy achieves what it is supposed to.</p>
+
+<p>Ideally, machines are modeled with policy from the ground up, starting
+with Just Enough Operating System to allow them to run Chef. This
+ensures all the details of a system have been captured and are reproducible.</p>
+
+<p>Other ways of reproducing state work, but come with the burden of
+having to drag that knowledge around with you. Snapshots, kickstart or
+bootstrap scripts, and even manual configuration will all work as long
+as you can promise they&rsquo;re accurate.</p>
+
+<p>There are some situations where reproducing a test system is
+impossible, or modeling it from the ground up is not an option. In
+this case, a slow, careful, incremental application of policy, aided
+by dry-run mode and human intuition is the safest way to start. Chef&rsquo;s
+why-run mode can help aide intuition by publishing assumptions about
+what&rsquo;s going on. &ldquo;I would start the service, assuming the software had
+been previously installed&rdquo; helps quite a bit during development.</p>
+
+<p>Finally, increasing the resolution of our policies will help the most
+in the long term. The more robots the better. Ensuring the contents of
+your configuration files is good. Making sure that they are only ones
+present in a conf.d directory is better. As a community, we need to
+produce as much high quality, trusted, tested, and reuseable policy as
+possible.</p>
+
+<p>Good luck, and be careful out there.</p>
+
+<p>-s</p>
+]]></content>
+  </entry>
+  
+  <entry>
+    <title type="html"><![CDATA[CFEngine Puppet and Chef Part 3]]></title>
+    <link href="http://blog.afistfulofservers.net/post/2011/12/30/cfengine-puppet-and-chef-part-3/"/>
+    <updated>2011-12-30T20:11:00-05:00</updated>
+    <id>http://blog.afistfulofservers.net/post/2011/12/30/cfengine-puppet-and-chef-part-3</id>
+    <content type="html"><![CDATA[<p>At the end of the last installment, we used Puppet to create a Chef server. That brings us full circle, and the only thing we have left to do is examine how Chef works. We&rsquo;ll do that by looking at the code that gave us our original CFEngine server.</p>
+
+<h2> Chef </h2>
+
+
+<p><img class="right <a" src="href="http://farm4.staticflickr.com/3024/2417315604_ba73be6be2.jpg">http://farm4.staticflickr.com/3024/2417315604_ba73be6be2.jpg</a>&#8221; width=&#8221;300&#8221; height=&#8221;300&#8221;></p>
+
+<p>Since they&rsquo;re both written in Ruby, people tend to compare Puppet and Chef. This is natural since they have a lot in common. Both are convergence based configuration management tools inspired by CFEngine. Both have stand alone discovery agents (facter and ohai, respectively), as well as RESTful APIs for gleaning node information from the server. It turns out, however, that Chef actually has a lot more in common with CFEngine.</p>
+
+<p>Like CFEngine, Chef copies policy from the server and evaluates it on the edges. This allows for high scalability, since the server isn&rsquo;t doing very much. Think of web application that does most of its work in the browser instead of on the server.</p>
+
+<p>A Chef recipe is a collection of convergent <a href=http://wiki.opscode.com/display/chef/Resources target="_blank">resource</a> statements, and serves as the basic unit of intent. This is analogous to a CFEngine promise bundle. The Chef run list is how recipe ordering is defined, and is directly comparible to CFEngine&rsquo;s bundlesqeuence. Using this approach makes it easy to reason about what&rsquo;s going on when writing infrastructure as code.</p>
+
+<h2> Chef Specials </h2>
+
+
+
+
+<h3> Imperative programming and declarative interface </h3>
+
+
+<p>While it&rsquo;s true that Chef is just &ldquo;pure ruby&rdquo; and therefore imperative, to say that Chef is imperative without considering the declarative interface to resources is disingenuous at best. Using nothing but Chef resources, recipes look very much like their CFEngine and Puppet counterparts. The non-optimally ordered Chef version of NTP converges in the same number of runs as the CFEngine example from the first installment. This is because the <a href=http://www.iu.hio.no/~mark/papers/immune.pdf target="_blank">underlying science</a> of convergent operators is the same.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+</pre></td><td class='code'><pre><code class='ruby'><span class='line'><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;h1&gt;service&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="nb">p</span><span class="o">&gt;</span><span class="n">service</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">action</span> <span class="o">[</span> <span class="ss">:enable</span><span class="p">,</span> <span class="ss">:start</span> <span class="o">]</span>
+</span><span class='line'>  <span class="n">ignore_failure</span> <span class="kp">true</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;h1&gt;file&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="nb">p</span><span class="o">&gt;</span><span class="n">template</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">etc</span><span class="o">/</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">source</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">erb</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">owner</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">root</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">group</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">root</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">mode</span> <span class="mo">0644</span>
+</span><span class='line'>  <span class="n">notifies</span> <span class="ss">:restart</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">service</span><span class="o">[</span><span class="n">ntp</span><span class="o">]&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">ignore_failure</span> <span class="kp">true</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;h1&gt;package&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="nb">p</span><span class="o">&gt;</span><span class="n">package</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">action</span> <span class="ss">:install</span>
+</span><span class='line'>  <span class="n">ignore_failure</span> <span class="kp">true</span>
+</span><span class='line'><span class="k">end</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p><a href=http://bit.ly/vPixyI target="_blank">When and where order matters</a>, imperative ordering isolated within a recipe is the most intuitive way for sysadmins to accomplish tasks within the convergent model. &ldquo;Install a package, edit a config file, and start the service&rdquo; is how most people think about the task. Imperative ordering of declarative statements give the best of both worlds. When order does NOT matter, it&rsquo;s safe to re-arrange recipe ordering in the Chef run list.</p>
+
+<h3> Multiphase execution </h3>
+
+
+<p>The real trick to effective Chef cookbook development is to understand the <a href=http://wiki.opscode.com/display/chef/Anatomy+of+a+Chef+Run target="_blank">Anatomy of a Chef Run</a>. When a Chef recipe is evaluated in the compilation phase, encountered resources are added to the Resource Collection, which is an array of evaluated resources with deferred execution.</p>
+
+<p>The compile phase of this recipe would add 99 uniquely named, 12 oz, convergent beer_bottles to the collection, and the configure phase would take them down and pass them around. Subsequent runs would do nothing.
+<figure class='code'><figcaption><span>thanks jtimberman! </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='ruby'><span class='line'><span class="n">size</span> <span class="o">=</span> <span class="p">((</span><span class="mi">2</span> <span class="o">*</span> <span class="mi">3</span><span class="p">)</span> <span class="o">*</span> <span class="mi">4</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;99.downto(1) do |i|</span>
+</span><span class='line'><span class="sr">  beer_bottle &amp;ldquo;bottle-</span><span class="si">#{</span><span class="n">i</span><span class="si">}</span><span class="sr">&amp;rdquo; do</span>
+</span><span class='line'><span class="sr">    oz size</span>
+</span><span class='line'><span class="sr">    action [ :take_down, :pass_around ]</span>
+</span><span class='line'><span class="sr">  end</span>
+</span><span class='line'><span class="sr">end</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>The idea is that you can take advantage of the full power of Ruby to make decisions about what to declare about your resources. Most people just use the built in Chef APIs to consult chef-server for topology information about their infrastructure. However, there&rsquo;s nothing stopping you from importing random Ruby modules and accessing existing SQL databases instead.</p>
+
+<p>Want to name name servers after your Facebook friends? <a href=http://rfacebook.rubyforge.org/ type="_blank">Go for it.</a> Want your MOTD to list all James Brown albums released between 1980 and 1990? <a href=https://github.com/buntine/discogs type="_blank">Not a problem</a>. The important part is that things are ultimately managed with a declarative, idempotent, and convergent resource interface.</p>
+
+<h2> cfengine.rb </h2>
+
+
+<p>Let&rsquo;s take a look at the recipe that gave us our original CFEngine server.</p>
+
+<p>File /Users/someara/src/someara.github.com/source/affs-blog/cookbooks/cfengine/recipes/server.rb could not be found</p>
+
+<h2> Topology management </h2>
+
+
+<p>When a node is bootstrapped with Chef, a run list of roles or recipes is requested by the node itself. After that, the host is found by recipes running elsewhere in the infrastructure by <a href=http://bit.ly/vI5Z9l target="_blank">searching</a> for roles or attributes. This is contrasted from the CFEngine and Puppet techniques of matching classes based on a hostname, FQDN, IP, or other found information.</p>
+
+<p>This approach has the effect of decoupling a node&rsquo;s name from its functionality. Line 10 in <code>cfengine.rb</code> above searches out node objects and later be passes them to the <code>promises-server.cf.erb</code> template for authorization.</p>
+
+<h2> Wrapping up </h2>
+
+
+<p>So there you have it folks. Chef making CFEngine making Puppet making Chef. These tools can be used to automate literally anything, and they&rsquo;re pretty easy to use once you figure out how they work. I was going to throw some Bcfg2 and LCFG in there just for fun, but I only had some much free time =)</p>
+
+<p>Configuration mangement is like a portal.</p>
+
+<p>-s</p>
+]]></content>
+  </entry>
+  
+  <entry>
+    <title type="html"><![CDATA[CFEngine Puppet and Chef Part 2]]></title>
+    <link href="http://blog.afistfulofservers.net/post/2011/12/30/cfengine-puppet-and-chef-part-2/"/>
+    <updated>2011-12-30T20:10:00-05:00</updated>
+    <id>http://blog.afistfulofservers.net/post/2011/12/30/cfengine-puppet-and-chef-part-2</id>
+    <content type="html"><![CDATA[<p>In the previous installment, we used Chef to configure CFEngine to serve policy that allowed us to create a Puppet service. In this one, we&rsquo;ll have Chef use that Puppet service to create a Chef server. If you think this is a ridiculous thing to do, I would be inclined to agree with you. However, this is my blog so I make the rules.</p>
+
+<h2> Puppet </h2>
+
+
+<p>Puppet at its core works like CFEngine. Statements in Puppet are convergent operators, in that they are declarative (and therefore idempotent), and convergent in that they check a resource&rsquo;s state before taking any action. Like the NTP example from the CFEngine installment, non-optimally ordered execution will usually work itself out after repeated Puppet runs.</p>
+
+<p>Unlike CFEngine, where policy is copied and evaluated on the edges, Puppet clients connect to the Puppet server where configuration is determined based on a certificate CN. A catalog of serialized configuration data is shipped back to the client for execution. This catalog is computed based on the contents of the manifests stored on the server, as well as a collection of <a href=http://puppetlabs.com/puppet/related-projects/facter target="_blank">facts</a> collected from the clients. Puppet facts, like CFEngine hard classes, are discoverable things about a node such as OS version, hostname, kernel version, network information, etc.</p>
+
+<p><img class="left <a" src="href="http://images3.wikia.nocookie.net/__cb20050917222913/memoryalpha/en/images/d/d6/Coffee_replicates_then_mug.jpg">http://images3.wikia.nocookie.net/__cb20050917222913/memoryalpha/en/images/d/d6/Coffee_replicates_then_mug.jpg</a>&#8221; width=&#8221;300&#8221; height=&#8221;300&#8221;></p>
+
+<p>Puppet works a bit like the food replicators in Star Trek. <a href=http://docs.puppetlabs.com/references/stable/type.html target="_blank">Resources</a> make up the basic atoms of a system, and the precise configuration of each must be defined. If a resource is defined twice in a manifest with conflicting states, Puppet refuses to run.</p>
+
+<p>Ordering can be specified though <code>require</code> statements that set up relations between resources. These are used to build a <a href=http://en.wikipedia.org/wiki/Directed_graph target="_blank">directed graph</a>, which Puppet sorts <a href=http://en.wikipedia.org/wiki/Topological_sorting>topologically</a> and uses to determine the final ordering. If a resource in a chain fails for some reason, dependent resources down the graph will be skipped.</p>
+
+<p>This allows for isolation of non-related resources collections. For example, if a package repository for some reason fails to deliver the &lsquo;httpd&rsquo; package, its dependent configuration file and service resources will be skipped. This has nothing to do with an SSH resource collection, so the resources concerning that service will be executed even though the httpd collection had previously failed.</p>
+
+<p>Just be careful not to create the coffee without the cup.</p>
+
+<h2> chef.pp </h2>
+
+
+<p>Let&rsquo;s examine a Puppet manifest that creates a Chef server on Centos 6.</p>
+
+<p>File /Users/someara/src/someara.github.com/source/affs-blog/cookbooks/cfengine/files/default/server/puppet/manifests/classes/chef.pp could not be found</p>
+
+<h2> Picking it apart </h2>
+
+
+<p>Line 1 is a Puppet class definition. This groups the resource statments between together, allowing us to assign <code>chef-server</code> to a node based on its hostname. This can be accomplished with an explicit nodes.pp definition, or with an external node classifier.</p>
+
+<p>Line 3 is an <code>exec</code> resource, which we can later refer to with its name: <code>rbel6-release</code>. When using <code>exec</code> resources, it&rsquo;s up to you to specify a convergence check. In this case, we used the <code>unless</code> keyword to check the return status of an rpm command. The same goes for <code>command</code> promise types in CFEngine, or an <code>execute</code> resources in Chef.</p>
+
+<p>Line 9 is an example of an array variable, which is iterated over in line 21, much like a CFEngine slist.</p>
+
+<p>Everything else is a standard Puppet resource declaration, each of which have a type, a name, and an argument list. Like CFEngine promises, each type has various intentions available under the hood. Packages can be installed. Services can be running or stopped, and files can be present with certain contents and permissions.</p>
+
+<p>Refer to the Puppet <a href=http://docs.puppetlabs.com/ target="_blank">documentation</a> for more details.</p>
+
+<h2> On to Chef </h2>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife bootstrap centos6-3 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>affs-chef<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N <span class="p">&amp;</span>ldquo<span class="p">;</span>affs-chef-1.example.com<span class="p">&amp;</span>rdquo<span class="p">;</span> -E development -d affs-omnibus-pre -x root
+</span></code></pre></td></tr></table></div></figure></p>
+]]></content>
+  </entry>
+  
+  <entry>
+    <title type="html"><![CDATA[CFEngine Puppet and Chef Part 1]]></title>
+    <link href="http://blog.afistfulofservers.net/post/2011/12/30/cfengine-puppet-and-chef-part-1/"/>
+    <updated>2011-12-30T20:09:00-05:00</updated>
+    <id>http://blog.afistfulofservers.net/post/2011/12/30/cfengine-puppet-and-chef-part-1</id>
+    <content type="html"><![CDATA[<h2> Introduction </h2>
+
+
+<p>Over the past few years, the topic of Infrastructure Automation has received a huge amount of attention. The three most commonly used tools for doing this (in order of appearance) are CFEngine, Puppet, and Chef. This article explores each of them by using one to set up another. If you have a chef-server or Hosted Chef account, you can follow along by following the instructions in the setup section. (Full disclosure: I work for Opscode, creators of Chef.)</p>
+
+<h2> Infrastructure </h2>
+
+
+<p><a href=http://www.infrastructures.org target="_blank">“Infrastructure”</a> turns out to be the hardest thing to explain when discussing automation, yet is the most critical to understand. In this context, Infrastructure isn’t anything physical (or virtualized) like servers or networks. Instead, what we’re talking about is all the “stuff” that is configured across machines to enable an application or service.</p>
+
+<p>In practice, “stuff” translates to operating system baselines, kernel settings, disk mounts, OS user accounts, directories, symlinks, software installations, configuration files, running processes, etc. People of the ITIL persuasion may think of these as Configuration Items. Units of management are composed into larger constructs, and complexity arises as these arrangements become more intricate.</p>
+
+<p>Services running in an Infrastructure need to communicate with each other, and do so via networks. Even when running on a single node, things still communicate over a loopback address or a Unix domain socket. This means that Infrastructure has a topology, which is in itself yet another thing to manage.</p>
+
+<h2> Automation </h2>
+
+
+<p><img class="left <a" src="href="http://upload.wikimedia.org/wikipedia/commons/7/75/Duck_of_Vaucanson.jpg">http://upload.wikimedia.org/wikipedia/commons/7/75/Duck_of_Vaucanson.jpg</a>&#8221;></p>
+
+<p>Here is a picture of a duck.</p>
+
+<p>This duck happens to be an <a href=http://en.wikipedia.org/wiki/Automaton target="_blank">automaton</a>. An automaton is a self-operating machine. This one pretends to digest grain. It interacts with its environment by taking input and producing output. To continue operating, the duck requires maintenance. It needs to be wound, cleaned, and repaired. Automated services running on a computer are no different.</p>
+
+<p>Once turned on, an automated service takes input, does something useful, then leaves logs and other data in its wake. Its machinery is the arrangement of software installation, configuration, and the running state of a process. Maintenance is performed in a <a href=http://en.wikipedia.org/wiki/Autonomic_Computing target="_blank">control loop</a>, where an agent comes around at regular intervals inspecting its parts and fixing anything that’s broken.</p>
+
+<p>In automated configuration management, the name of the game is hosting policy. The agents that build and maintain systems pull down blueprints and set to work building our automatons. When systems come back up from maintenance or new ones spring into existence, they configure themselves by downloading policy from the server.</p>
+
+<h2> Setup </h2>
+
+
+<p>If you&rsquo;d like to follow along by configuring your own machines with knife, follow the setup instructions <a href=/cfchefipuppetengine-setup target="_blank">here</a>. The setup will get your Chef workstation configured, code checked out from my blog git repo, and uploaded to chef-server for use. Otherwise, you can just browse the source <a href=https://github.com/someara/affs-blog target="_blank">here</a></p>
+
+<h2> CFEngine </h2>
+
+
+<p><img class="right <a" src="href="http://farm1.staticflickr.com/120/293693669_59574a7640_m.jpg">http://farm1.staticflickr.com/120/293693669_59574a7640_m.jpg</a>&#8221; title=&#8221;A picture of what a cloud may look like&#8221; ></p>
+
+<p>CFEngine is a system based on <a href=http://research.iu.hio.no/papers/rosegarden.pdf target="_blank">promise</a> <a href=http://project.iu.hio.no/papers/origin2.pdf target="_blank">theory</a>. Promises are the basic atoms of the CFEngine universe. They have names, types, and intentions (among other things), and each acts as a convergent operator to move its subject toward an intended state. Like the parts in our duck, promises are assembled to create a larger whole.</p>
+
+<p>Promises of various types are capable of different things. Promises of type &ldquo;package&rdquo; can interact with a package manager to make sure somthing is installed or removed, while a promise of type &ldquo;file&rdquo;, can copy, edit, and set permissions. Processes can be started or stopped, and commands can be ran if needed. Read all about them in the CFEngine <a href=http://cfengine.com/manuals/cf3-reference.html target="_blank">reference manual</a>.</p>
+
+<p>Promises provide a <a href=http://c2.com/cgi/wiki?DeclarativeDefinition target="_blank">declarative</a> interface to resources under management, which has the remarkably handy attribute of being <a href=http://en.wikipedia.org/wiki/Idempotence target="_blank">idempotent</a>. An idempotent function gives the same result when applied multiple times. This allows our duck repairing maintence loop (in the form of cf-agent on a cron) to come around and safely execute instructions without having to worry about side effects. Consider &ldquo;the line &lsquo;foo&rsquo; should exist in the file&rdquo; vs &ldquo;append &lsquo;foo&rsquo; to the end of the file&rdquo;; the non-declarative &lsquo;append&rsquo; would not be safe to repeat.</p>
+
+<p><a href=http://en.wikipedia.org/wiki/Convergence_(mathematics) target="_blank">Convergent</a> maintenance refers to the continuous repair of a system towards a desired state. At the individual promise level, convergence happens in a single run of the maintenance loop. If a package is supposed to be installed but isn&rsquo;t, action will be taken to fix it. If a process is not running but should be, action will be taken again. Convergence in a larger system of promises can take multiple runs if things are processed in a non-optimal order. Consider the following:</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>Start the NTP service.
+</span><span class='line'>Make sure the NTP configuration file is correct, restart the NTP service if repaired.
+</span><span class='line'>Install the NTP package.</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Assuming a system with a base install, the first promise would fail to be kept. The NTP binary is not available, since we haven&rsquo;t installed its package yet. The second promise would write the configuration file, but fail to restart the service. The third promise would succeed, assuming an appropriate package repo was available and functioning properly. After the first run is complete, the system has converged closer to where we want it to be, but isn&rsquo;t quite there yet. Applying the functions again gets us closer to our goal.</p>
+
+<p>The second run of the loop would succeed in starting the service, but would be using the wrong configuration file. The package install from the previous loop clobbered the one written previously. Promise number two would fix the config and restart the service, and the third would do nothing because the package is already installed. Finally, we&rsquo;ve converged to our desired system state. A third loop would take no actions at all.</p>
+
+<h2> Kicking things off </h2>
+
+
+<p>To set up a CFEngine server, invoke the following Chef command:</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife bootstrap centos6-1 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>cfengine<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N <span class="p">&amp;</span>ldquo<span class="p">;</span>cfengine-1.example.com<span class="p">&amp;</span>rdquo<span class="p">;</span> -E development -d affs-omnibus-pre -x root
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>When Chef is done doing its thing, you&rsquo;ll end up with a functioning CFEngine policy host, happily promising to serve policy. Log into the freshly configured machine and check it out. Three things have happened. First, the cfengine package itself has been installed. Second, two directories have been created and populated: <code>/var/cfengine/inputs</code>, and <code>/var/cfengine/masterfiles</code>.</p>
+
+<p>The <code>inputs</code> directory contains configuration for the CFEngine itself, which includes a promise to make the contents of <code>masterfiles</code> available for distribution. When a CFEngine client comes up, it will copy the contents of <code>/var/cfengine/masterfiles</code> from the server into its own <code>inputs</code> directory.</p>
+
+<h2> Examining policy </h2>
+
+
+<p>CFEngine&rsquo;s main configuration file is <code>promises.cf</code>, from which everything else flows.  Here&rsquo;s a short snippet:</p>
+
+<p><figure class='code'><figcaption><span>promises.cf snippet </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+</pre></td><td class='code'><pre><code class='ruby'><span class='line'><span class="n">body</span> <span class="n">common</span> <span class="n">control</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">bundlesequence</span>  <span class="o">=&gt;</span> <span class="p">{</span>
+</span><span class='line'>    <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">update</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;,</span>
+</span><span class='line'>    <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">garbage_collection</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;,</span>
+</span><span class='line'>    <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">cfengine</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;,</span>
+</span><span class='line'>    <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">puppet_server</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;,</span>
+</span><span class='line'>  <span class="p">};</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;  inputs  =&gt; {</span>
+</span><span class='line'><span class="sr">    &amp;ldquo;update.cf&amp;rdquo;,</span>
+</span><span class='line'><span class="sr">    &amp;ldquo;cfengine_stdlib.cf&amp;rdquo;,</span>
+</span><span class='line'><span class="sr">    &amp;ldquo;cfengine.cf&amp;rdquo;,</span>
+</span><span class='line'><span class="sr">    &amp;ldquo;garbage_collection.cf&amp;rdquo;,</span>
+</span><span class='line'><span class="sr">    &amp;ldquo;puppet.cf&amp;rdquo;,</span>
+</span><span class='line'><span class="sr">  };</span>
+</span><span class='line'><span class="sr">}</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>The bundlesequence section tells cf-agent what promise bundles to execute, and in what order. The one we&rsquo;re examining today is named puppet_server, found in <code>puppet.cf</code></p>
+
+<p>File /Users/someara/src/someara.github.com/source/affs-blog/cookbooks/cfengine/templates/default/inputs/puppet.cf.erb could not be found</p>
+
+<p>A promise bundle is CFEngine&rsquo;s basic unit of intent. It&rsquo;s a place to logically group related promises. Within a bundle, CFEngine processes things with <a href=http://cfengine.com/manuals/cf3-reference.html#Normal-ordering target="_blank">normal ordering</a>. That is, variables are converged first, then classes, then files, then packages, and so on. I wrote the bundle sections in normal order to make it easier to read, but they could be rearranged and still have the same effect. Without going into too much detail about the language, I&rsquo;ll give a couple hints to help with groking the example.</p>
+
+<p>First, in CFEngine, the word &lsquo;class&rsquo; does not mean what it normally does in other programming languages. Instead, classes are boolean flags that describe context. Classes can be &lsquo;hard classes&rsquo;, which are discovered attributes about the environment (hostname, operating system, time, etc), or &lsquo;soft classes&rsquo;, which are defined by the programmer. In the above example, puppetmaster_enabled and iptables_enabled are soft classes set based on the return status of a command. In the place of <code>if</code> or <code>case</code> statements, boolean checks on classes are used.</p>
+
+<p>Second, there are no control statements like <code>for</code> or <code>while</code>. Instead, when lists are encountered they are automatically iterated. Check out the packages section for examples of both class decisions and list iteration. Given those two things, you should be able to work your way through the example. However, there&rsquo;s really no getting around reading the reference manual if you want to learn CFEngine.</p>
+
+<h2> On to Puppet </h2>
+
+
+<p>Finally, let&rsquo;s go ahead and use Chef to bring up a CFEngine client, which will be turned into a Puppet server.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife bootstrap centos6-2 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>puppet<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N <span class="p">&amp;</span>ldquo<span class="p">;</span>puppet-1.example.com<span class="p">&amp;</span>rdquo<span class="p">;</span> -E development -d affs-omnibus-pre -x root
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>The first run will fail, since the host&rsquo;s IP isn&rsquo;t yet in the cfengine server&rsquo;s allowed hosts lists. Complete the convergence by running these commands:</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife ssh <span class="p">&amp;</span>ldquo<span class="p">;</span>role:cfengine<span class="p">&amp;</span>rdquo<span class="p">;</span> -a ipaddress chef-client
+</span><span class='line'>knife ssh <span class="p">&amp;</span>ldquo<span class="p">;</span>role:puppet<span class="p">&amp;</span>rdquo<span class="p">;</span> -a ipaddress chef-client
+</span><span class='line'>knife ssh <span class="p">&amp;</span>ldquo<span class="p">;</span>role:puppet<span class="p">&amp;</span>rdquo<span class="p">;</span> -a ipaddress chef-client
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>And viola! A working Puppet server, serving policy.</p>
+]]></content>
+  </entry>
+  
+  <entry>
+    <title type="html"><![CDATA[A Brief Chef Tutorial (From Concentrate)]]></title>
+    <link href="http://blog.afistfulofservers.net/post/2011/03/16/a-brief-chef-tutorial-from-concentrate/"/>
+    <updated>2011-03-16T15:18:00-04:00</updated>
+    <id>http://blog.afistfulofservers.net/post/2011/03/16/a-brief-chef-tutorial-from-concentrate</id>
+    <content type="html"><![CDATA[<h2> Overview </h2>
+
+
+<p></p>
+
+<p>Chef is configuration management platform written in Ruby. Configuration management is a large topic that most systems administrators and IT management are just now starting to gain experience with. Historically, infrastructures have been maintained either by hand, with structured scripting, by imagine cloning, or a combination of those. Chef’s usage model rejects the idea of cloning and maintaining “golden images”. Instead, the idea is to start with an embryonic image and grow it into it’s desired state. This works much better as infrastructure complexity increases, and eliminates the problem of image sprawl. The convergent nature of the tool allows you to change the infrastructure over time without much fuss. Chef allows you to express your infrastructure as code, which lets you store it in version control.</p>
+
+<p>“A Can of Condensed Chef Documentation” is available <a href=/post/2011/03/15/a-can-of-condensed-chef-documentation/> here </a></p>
+
+<h2> Prerequisites </h2>
+
+
+
+
+<h3> Git </h3>
+
+
+<p>Actually you can use any SCM, but git is the most widely adopted in the Chef community. All Chef Git repos begin their lives as clones of the Opscode chef-repo, found here: <a href="https://github.com/opscode/chef-repo">https://github.com/opscode/chef-repo</a> There is a nice overview of the repo structure (cookbooks, databags, roles, etc) in the README.</p>
+
+<h3> chef-server up and running at a known IP or FQDN. </h3>
+
+
+<p>This is easily installed from packages by following the instructions on the opscode wiki. The process amounts to “add a package repository, install the packages, and turn it on” Alternatively, you could use the Opscode Platform and go dancing with space robots.</p>
+
+<h3> Knife installed on your local system </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>gem install chef net-ssh net-ssh-multi fog highline
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Chef git repo checked out on local file system </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>git clone &lt;a <span class="nv">href</span><span class="o">=</span><span class="s2">&quot;https://github.com/opscode/chef-repo&quot;</span>&gt;https://github.com/opscode/chef-repo&lt;/a&gt;
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Client certificate creation </h3>
+
+
+<p>A “client” in chef parlance is an SSL certificate used to access the chef-server API. If the client’s CN name is marked “admin” in chef-server, the client can perform restricted operations such as creating and deleting nodes. This is the kind of client needed by knife to manipulate the infrastructure, and normally correspond to actual human being, but by no means has to. Nodes have non-admin client certificates, and can only manipulate their own node objects. To create a client certificate, you’ll need to log into the chef-server webui, click on “clients”, think of a name for it (I use someara), and paste the displayed private key into a local file.</p>
+
+<p><strong> Copy the validation key </strong><br>
+The validation key is a special key that is shared by all freshly bootstrapped nodes. It has the ability to create new client certificates and nodes objects through the API.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>scp root@chefserver:/etc/chef/validation.pem .chef/
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Edit configuration files </h3>
+
+
+<p>For more details on this section, please visit <a href="http://wiki.opscode.com/display/chef/Chef+Configuration+Settings">http://wiki.opscode.com/display/chef/Chef+Configuration+Settings</a></p>
+
+<p>.chef/client.rb - This file is copied onto the nodes that are bootstrapped with knife, and needs to be configured to point to the IP or FQDN of your chef server</p>
+
+<p>example
+<figure class='code'><figcaption><span>$ vim client.rb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+</pre></td><td class='code'><pre><code class='rb'><span class='line'><span class="n">log_level</span>          <span class="ss">:info</span>
+</span><span class='line'><span class="n">log_location</span>       <span class="no">STDOUT</span>
+</span><span class='line'><span class="n">ssl_verify_mode</span>    <span class="ss">:verify_none</span>
+</span><span class='line'><span class="n">chef_server_url</span>    <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">&lt;</span><span class="n">a</span> <span class="n">href</span><span class="o">=</span><span class="s2">&quot;http://y.t.b.d:4000&quot;</span><span class="o">&gt;</span><span class="ss">http</span><span class="p">:</span><span class="sr">//</span><span class="n">y</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">b</span><span class="o">.</span><span class="n">d</span><span class="p">:</span><span class="mi">4000</span><span class="o">&lt;</span><span class="sr">/a&gt;&amp;rdquo;</span>
+</span><span class='line'><span class="sr">file_cache_path    &amp;ldquo;/</span><span class="n">var</span><span class="o">/</span><span class="n">cache</span><span class="o">/</span><span class="n">chef</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">pid_file</span>           <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">run</span><span class="o">/</span><span class="n">chef</span><span class="o">/</span><span class="n">client</span><span class="o">.</span><span class="n">pid</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">cache_options</span><span class="p">({</span> <span class="ss">:path</span> <span class="o">=&gt;</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">cache</span><span class="o">/</span><span class="n">chef</span><span class="o">/</span><span class="n">checksums</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;,</span> <span class="ss">:skip_expires</span> <span class="o">=&gt;</span> <span class="kp">true</span><span class="p">})</span>
+</span><span class='line'><span class="n">signing_ca_user</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">chef</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="no">Mixlib</span><span class="o">::</span><span class="no">Log</span><span class="o">::</span><span class="no">Formatter</span><span class="o">.</span><span class="n">show_time</span> <span class="o">=</span> <span class="kp">true</span>
+</span><span class='line'><span class="n">validation_client_name</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">chef</span><span class="o">-</span><span class="n">validator</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">validation_key</span>         <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">etc</span><span class="o">/</span><span class="n">chef</span><span class="o">/</span><span class="n">validation</span><span class="o">.</span><span class="n">pem</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">client_key</span>             <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">etc</span><span class="o">/</span><span class="n">chef</span><span class="o">/</span><span class="n">client</span><span class="o">.</span><span class="n">pem</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>.chef/knife.rb - This file also needs to be configured to point to your chef-server, and also to the client private key that was created earlier.</p>
+
+<p>example
+<figure class='code'><figcaption><span>$ vim knife.rb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+</pre></td><td class='code'><pre><code class='rb'><span class='line'><span class="n">log_level</span>            <span class="ss">:info</span>
+</span><span class='line'><span class="n">log_location</span>         <span class="no">STDOUT</span>
+</span><span class='line'><span class="n">node_name</span>           <span class="o">&amp;</span><span class="n">lsquo</span><span class="p">;</span><span class="n">knife</span><span class="o">&amp;</span><span class="n">rsquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">cache_type</span>          <span class="o">&amp;</span><span class="n">lsquo</span><span class="p">;</span><span class="no">BasicFile</span><span class="o">&amp;</span><span class="n">rsquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">cache_options</span><span class="p">(</span> <span class="ss">:path</span> <span class="o">=&gt;</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">~</span><span class="sr">/.chef/</span><span class="n">checksums</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="p">)</span>
+</span><span class='line'><span class="n">client_key</span>       <span class="o">&amp;</span><span class="n">lsquo</span><span class="p">;</span><span class="o">~</span><span class="sr">/.chef/</span><span class="n">knife</span><span class="o">.</span><span class="n">key</span><span class="o">.</span><span class="n">pem</span><span class="o">&amp;</span><span class="n">rsquo</span><span class="p">;</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;cookbook_path       [ &amp;ldquo;~/m</span><span class="n">ychefrepo</span><span class="o">/</span><span class="n">cookbooks</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="o">]</span>
+</span><span class='line'><span class="n">cookbook_copyright</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">example</span> <span class="n">org</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">cookbook_email</span>     <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">&lt;</span><span class="n">a</span> <span class="n">href</span><span class="o">=</span><span class="s2">&quot;&amp;#x6d;&amp;#x61;&amp;#105;&amp;#x6c;&amp;#x74;&amp;#111;&amp;#58;&amp;#99;&amp;#111;&amp;#x6f;&amp;#107;&amp;#98;&amp;#111;&amp;#x6f;&amp;#107;&amp;#115;&amp;#64;&amp;#x65;&amp;#120;&amp;#97;&amp;#109;&amp;#x70;&amp;#108;&amp;#x65;&amp;#46;&amp;#110;&amp;#x65;&amp;#x74;&quot;</span><span class="o">&gt;&amp;</span><span class="c1">#x63;&amp;#x6f;&amp;#x6f;&amp;#107;&amp;#98;&amp;#x6f;&amp;#111;&amp;#107;&amp;#115;&amp;#64;&amp;#101;&amp;#120;&amp;#x61;&amp;#x6d;&amp;#112;&amp;#x6c;&amp;#101;&amp;#46;&amp;#110;&amp;#101;&amp;#x74;&lt;/a&gt;&amp;rdquo;</span>
+</span><span class='line'><span class="n">cookbook_license</span>   <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">apachev2</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;chef_server_url    &amp;ldquo;&lt;a href=&quot;http:/</span><span class="o">/</span><span class="n">y</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">b</span><span class="o">.</span><span class="n">d</span><span class="p">:</span><span class="mi">4000</span><span class="s2">&quot;&gt;http://y.t.b.d:4000&lt;/a&gt;&amp;rdquo;&lt;/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;p&gt;validation_key      &amp;ldquo;~/.chef/validation.pem&amp;rdquo;&lt;/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;rackspacecloud&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;p&gt;knife[:rackspace_api_key] = &amp;lsquo;00000000000000000000000000000000&amp;rsquo;</span>
+</span><span class='line'><span class="s2">knife[:rackspace_username] = &amp;lsquo;rackspace&amp;rsquo;&lt;/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;slicehost&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;p&gt;knife[:slicehost_password] = &amp;lsquo;0000000000000000000000000000000000000000000000000000000000000000&amp;rsquo;&lt;/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;AFFS aws&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;p&gt;knife[:aws_access_key_id]     = &amp;lsquo;00000000000000000000&amp;rsquo;</span>
+</span><span class='line'><span class="s2">knife[:aws_secret_access_key] = &amp;lsquo;0000000000000000000000000000000000000000&amp;rsquo;&lt;/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:region]  = &amp;ldquo;us-east-1&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:availability_zone] = &amp;ldquo;us-west-1b&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:ssh_user] = &amp;ldquo;root&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:flavor] = &amp;ldquo;t1.micro&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:image] = &amp;ldquo;ami-10a55279&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:use_sudo]  = &amp;ldquo;false&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;h1&gt;knife[:distro] = &amp;ldquo;affs-fc13&amp;rdquo;&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="s2">&lt;p&gt;</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h2> Role, recipes, and run lists</h2>
+
+
+<p>As mentioned earlier, run lists are made up from role trees. Here is an example of how you would create a demo server with a correct clock, managed users, and metrics and monitoring capabilities. In this example, six recipes are executed per run, and an unknown number of resources are managed. (To figure that out, you’d have to read the recipes)</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+</pre></td><td class='code'><pre><code class=''><span class='line'>role[demo]
+</span><span class='line'>  role[base]                   &lt;&mdash;- nested role
+</span><span class='line'>  recipe[foo::server]
+</span><span class='line'>  recipe[foo::muninplugin]&lt;/p>
+</span><span class='line'>
+</span><span class='line'>&lt;p>role[base]
+</span><span class='line'>  recipe[ntp]
+</span><span class='line'>  recipe[localusers::common]
+</span><span class='line'>  recipe[munin::client]
+</span><span class='line'>  recipe[nagios::client]&lt;/p>
+</span><span class='line'>
+</span><span class='line'>&lt;p>expanded run list
+</span><span class='line'>  recipe[ntp]
+</span><span class='line'>    recipe[localusers::common]
+</span><span class='line'>    recipe[munin::client]
+</span><span class='line'>    recipe[nagios::client]
+</span><span class='line'>    recipe[foo::server]
+</span><span class='line'>    recipe[foo::muninplugin]</span></code></pre></td></tr></table></div></figure></p>
+
+<p>That’s quite a bit of cooking for a beginner tutorial, so we’re just going to focus on a single node running an NTP client for now. Roles can be written either as .rb files or .json files. I prefer to use the .rb format because they’re easier to read and write. Some people prefer to deal with the JSON formatted version directly, since thats the way they’re dumped with knife. At the end of the day, it doesn’t really matter, so do which ever makes you happy.</p>
+
+<h3> Step One : Creating a demo role file </h3>
+
+
+<p><figure class='code'><figcaption><span>$ vim roles/demo.rb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class='rb'><span class='line'><span class="nb">name</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">demo</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">description</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">demo</span> <span class="n">role</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="n">run_list</span> <span class="o">[</span>
+</span><span class='line'>    <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">recipe</span><span class="o">[</span><span class="n">ntp</span><span class="o">]&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>    <span class="o">]</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Step Two : Installing the role on chef-server </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife role from file roles/demo.rb
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h2> Writing Recipes </h2>
+
+
+<h3> Hello, NTP! </h3>
+
+
+<p>A machine’s NTP client is simple to install and configure. Every systems administrator is already familiar with it, which makes it a great example.</p>
+
+<p>Most software available as a native package in a given linux distribution can be managed with a “package, template, service” design pattern.</p>
+
+<p>Each of those words refers to a Chef resource, which we pass arguments to.</p>
+
+<h3> Step One : Creating an ntp cookbook </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife cookbook create ntp
+</span></code></pre></td></tr></table></div></figure>
+This creates a directory structure for the ntp cookbook. You can check it out with ls:
+<figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>ls -la cookbooks/ntp/
+</span><span class='line'>total 24
+</span><span class='line'>drwxr-xr-x  <span class="m">13</span> someara  staff   <span class="m">442</span> Mar <span class="m">14</span> 17:56 .
+</span><span class='line'>drwxr-xr-x  <span class="m">36</span> someara  staff  <span class="m">1224</span> Mar <span class="m">15</span> 19:39 ..
+</span><span class='line'>-rw-r<span class="p">&amp;</span>ndash<span class="p">;</span>r<span class="p">&amp;</span>ndash<span class="p">;</span>   <span class="m">1</span> someara  staff    <span class="m">58</span> Mar <span class="m">14</span> 17:56 README.rdoc
+</span><span class='line'>drwxr-xr-x   <span class="m">2</span> someara  staff    <span class="m">68</span> Mar <span class="m">14</span> 17:56 attributes
+</span><span class='line'>drwxr-xr-x   <span class="m">2</span> someara  staff    <span class="m">68</span> Mar <span class="m">14</span> 17:56 definitions
+</span><span class='line'>drwxr-xr-x   <span class="m">3</span> someara  staff   <span class="m">102</span> Mar <span class="m">14</span> 17:56 files
+</span><span class='line'>drwxr-xr-x   <span class="m">2</span> someara  staff    <span class="m">68</span> Mar <span class="m">14</span> 17:56 libraries
+</span><span class='line'>-rw-r<span class="p">&amp;</span>ndash<span class="p">;</span>r<span class="p">&amp;</span>ndash<span class="p">;</span>   <span class="m">1</span> someara  staff   <span class="m">259</span> Mar <span class="m">14</span> 17:56 metadata.rb
+</span><span class='line'>drwxr-xr-x   <span class="m">2</span> someara  staff    <span class="m">68</span> Mar <span class="m">14</span> 17:56 providers
+</span><span class='line'>drwxr-xr-x   <span class="m">4</span> someara  staff   <span class="m">136</span> Mar <span class="m">14</span> 17:56 recipes
+</span><span class='line'>drwxr-xr-x   <span class="m">2</span> someara  staff    <span class="m">68</span> Mar <span class="m">14</span> 17:56 resources
+</span><span class='line'>drwxr-xr-x   <span class="m">3</span> someara  staff   <span class="m">102</span> Mar <span class="m">14</span> 17:56 templates
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Step Two : Deciding what to name the recipe </h3>
+
+
+<p>Recipe names are related to cookbook structure. Putting recipe[foo::bar] in a node’s run list results in cookbooks/foo/recipes/bar.rb being downloaded from chef-server and executed.</p>
+
+<p>There is a special recipe in every cookbook called default.rb. It is executed by every recipe in the cookbook. Specifying recipe[foo::bar] actually results in cookbooks/foo/recipes/default.rb, as well as cookbooks/foo/recipes/bar.rb being executed.</p>
+
+<p>Default.rb is a good place to put common stuff when writing cookbooks with multiple recipes, but we’re going to keep it simple and just use default.rb for everything.</p>
+
+<h3> Step Three : Creating a recipe </h3>
+
+
+<p>This is where all the fun stuff happens. When using resources, you’re writing things in a declarative fashion. Declarative means you can concentrate on the WHAT without having to worry about the HOW. Chef will take care of that for you with something called a resource provider. When installing a package, it will check to see what your operating system is and use the appropriate methodology. For example, on Debian based systems, it will use apt-get, and on Redhat based systems, it will use yum.</p>
+
+<p><figure class='code'><figcaption><span>$ vim cookbooks/ntp/recipes/default.rb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+</pre></td><td class='code'><pre><code class='rb'><span class='line'><span class="n">package</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">action</span> <span class="o">[</span><span class="ss">:install</span><span class="o">]</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;template &amp;ldquo;/e</span><span class="n">tc</span><span class="o">/</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">source</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">erb</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">variables</span><span class="p">(</span> <span class="ss">:ntp_server</span> <span class="o">=&gt;</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">time</span><span class="o">.</span><span class="n">nist</span><span class="o">.</span><span class="n">gov</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="p">)</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;service &amp;ldquo;ntpd&amp;rdquo; do</span>
+</span><span class='line'><span class="sr">  action[:enable,:start]</span>
+</span><span class='line'><span class="sr">end</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Chef recipes are evaluated top down (like a normal ruby program), with each resource being ran in the order it appears. Order is important. In the above example, if we were to reverse the order of those three resources, it would first fail to start the service (as the software is not installed yet), then write the configuration file, then finally clobber the file it just wrote by installing the package.</p>
+
+<h3> Step Four : Creating the ntp.conf.erb template </h3>
+
+
+<p><figure class='code'><figcaption><span>$ vim cookbooks/ntp/templates/default/ntp.conf.erb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+</pre></td><td class='code'><pre><code class='erb'><span class='line'><span class="x">&lt;/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="x">&lt;h1&gt;generated by Chef.&lt;/h1&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="x">&lt;p&gt;restrict default kod nomodify notrap nopeer noquery</span>
+</span><span class='line'><span class="x">restrict -6 default kod nomodify notrap nopeer noquery</span>
+</span><span class='line'><span class="x">restrict 127.0.0.1</span>
+</span><span class='line'><span class="x">restrict -6 ::1</span>
+</span><span class='line'><span class="x">server &amp;lt;%= @ntp_server </span><span class="err">%&gt;</span><span class="x"></span>
+</span><span class='line'><span class="x">server  127.127.1.0     # local clock</span>
+</span><span class='line'><span class="x">driftfile /var/lib/ntp/drift</span>
+</span><span class='line'><span class="x">keys /etc/ntp/keys</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Step Five : uploading the cookbook to chef-server </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife cookbook upload ntp
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h2> Bootstraping nodes </h2>
+
+
+<p>The chef-client needs to somehow get itself installed and running on managed nodes. This process is known as bootstrapping and is accomplished with shell scripting. The method of bootstrap will vary depending on how you go about provisioning your server, and the script will depend on the platform.</p>
+
+<h3> Clouds </h3>
+
+
+<p>Cloud providers like AWS and Rackspace will let you make an API request, then return the IP of your compute resource.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife ec2 server create <span class="p">&amp;</span>ldquo<span class="p">;</span>role<span class="o">[</span>demo<span class="o">]</span><span class="p">&amp;</span>rdquo<span class="p">;</span> -N <span class="p">&amp;</span>ldquo<span class="p">;</span>demo.example.net<span class="p">&amp;</span>rdquo<span class="p">;</span> -i ami-3e02f257
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>In this example, knife uses the ruby fog library to talk to ec2 and request a server with an argument of the desired AMI. Knife then uses net-ssh-multi to ssh into the machine and execute a bootstrapping script. There are a number of other arguments that can be passed to knife, such as ec2 region, machine size, what ssh key to use. You can read all about them on the Opscode wiki.</p>
+
+<h3> Meatclouds </h3>
+
+
+<p>If your method of provisioning servers is “ask your VMware administrator” or “fill out these forms”, then you’ll probably bootstrap via an IP address.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife boostrap 10.0.0.5 -x root -N demo.example.net -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>demo<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -d pp-centos5
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Cobbler / FAI / pxe_dust / Jumpstart / etc </h3>
+
+
+<p>In these provisioning scenarios, you can skip knife completely and put the contents of a bootstrap script kickstart or equivalent.</p>
+
+<h2> Customizing the bootstrap </h2>
+
+
+<p>By default (with no arguments), Chef attempts a gem based installation meant to work on Ubuntu. If you’re not using Ubuntu, or are uncomfortable installing gems directly from rubygems.org, you’ll have to change the script to suite your taste. It works by specifying a template name with the -d flag, SSH’ing into the machine and running the rendered script. When using knife to SSH, make sure you have the correct key loaded into your ssh-agent.</p>
+
+<h3> Example </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife boostrap 10.0.0.5 -x root -N demo.example.net -r ‘role<span class="o">[</span>demo<span class="o">]</span>’ -d my-centos5
+</span></code></pre></td></tr></table></div></figure>
+ends up running this</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>ssh &lt;a <span class="nv">href</span><span class="o">=</span><span class="s2">&quot;&amp;#109;&amp;#97;&amp;#105;&amp;#x6c;&amp;#116;&amp;#x6f;&amp;#x3a;&amp;#114;&amp;#111;&amp;#x6f;&amp;#x74;&amp;#x40;&amp;#49;&amp;#48;&amp;#46;&amp;#x30;&amp;#46;&amp;#48;&amp;#x2e;&amp;#49;&amp;#55;&amp;#x39;&quot;</span>&gt;<span class="p">&amp;</span><span class="c">#x72;&amp;#x6f;&amp;#x6f;&amp;#x74;&amp;#x40;&amp;#49;&amp;#x30;&amp;#x2e;&amp;#x30;&amp;#x2e;&amp;#x30;&amp;#x2e;&amp;#x31;&amp;#x37;&amp;#57;&lt;/a&gt; bash -c ‘&lt;contents of rendered .chef/bootstrap/my-centos5.erb template&gt;’</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>What I do in my boot scripts:</p>
+
+<ul>
+<li>Correctly set the hostname to value of -N argument. (By correctly, I mean that <code>hostname -f</code> has to work properly)</li>
+<li>Configure the package repositories</li>
+<li>Install Chef. I like packages using the native package manager</li>
+<li>Copy the validation key</li>
+<li>Write /etc/chef/client.rb (points to server)</li>
+<li>Write a json file with the contents of the -r argument</li>
+<li>chef-client -j bootstrap.json</li>
+</ul>
+
+
+<p>After the script is ran, chef-client does the following</p>
+
+<ul>
+<li>Ohai!</li>
+<li>Client registration: SSL CN is FQDN from ohai</li>
+<li>Node creation: Node name is also FQDN from ohai, run lists are from JSON</li>
+<li>Expands run list</li>
+<li>Downloads needed cookbooks</li>
+<li>Starts executing recipes</li>
+</ul>
+
+
+<p>There is an example of a custom bootstrap script <a href=https://github.com/someara/affs-blog/blob/v1/.chef/bootstrap/affs-fc13.erb> here </a></p>
+
+<p>At this point, you should have an ntp client installed, configured, and running.</p>
+
+<p>(It’s actually a little bit more complicated than that. For more information about chef-client runs, see <a href=http://wiki.opscode.com/display/chef/Anatomy+of+a+Chef+Run> <a href="http://wiki.opscode.com/display/chef/Anatomy+of+a+Chef+Run">http://wiki.opscode.com/display/chef/Anatomy+of+a+Chef+Run</a> </a>)</p>
+
+<h2> Databag Driven Recipes </h2>
+
+
+<p>Data driven infrastructures are all the rage these days. This allows you to do things like change the NTP server all your nodes use by editing a single JSON value in chef-server. You can get really creative with this, so let your imagination run wild.</p>
+
+<h3> Step One : Create an ntp data bag </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife data bag create ntp
+</span><span class='line'><span class="nv">$ </span>mkdir -p data_bags/ntp
+</span><span class='line'><span class="nv">$ </span>vim data_bags/ntp/default_server.json
+</span><span class='line'><span class="o">{</span>
+</span><span class='line'>    <span class="p">&amp;</span>ldquo<span class="p">;</span>id<span class="p">&amp;</span>rdquo<span class="p">;</span> : <span class="p">&amp;</span>ldquo<span class="p">;</span>default_server<span class="p">&amp;</span>rdquo<span class="p">;</span>,
+</span><span class='line'>      <span class="p">&amp;</span>ldquo<span class="p">;</span>value<span class="p">&amp;</span>rdquo<span class="p">;</span> : <span class="p">&amp;</span>ldquo<span class="p">;</span>us.pool.ntp.org<span class="p">&amp;</span>rdquo<span class="p">;</span>
+</span><span class='line'><span class="o">}</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Step Two : Upload data bag to chef-server </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife data bag from file ntp data_bags/ntp/default_server.json
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h3> Step Three : Modify the recipe to take advantage of it </h3>
+
+
+<p><figure class='code'><figcaption><span>ntp/recipes/default.rb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+</pre></td><td class='code'><pre><code class='rb'><span class='line'><span class="n">package</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">action</span> <span class="o">[</span><span class="ss">:install</span><span class="o">]</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;ntp_server = data_bag_item(&amp;lsquo;ntp&amp;rsquo;, &amp;lsquo;default_server&amp;rsquo;)&lt;/</span><span class="nb">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="nb">p</span><span class="o">&gt;</span><span class="n">template</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">etc</span><span class="o">/</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">source</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">erb</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">variables</span><span class="p">(</span> <span class="ss">:ntp_server</span> <span class="o">=&gt;</span> <span class="n">ntp_server</span><span class="o">[&amp;</span><span class="n">lsquo</span><span class="p">;</span><span class="n">value</span><span class="o">&amp;</span><span class="n">rsquo</span><span class="p">;</span><span class="o">]</span> <span class="p">)</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;service &amp;ldquo;ntpd&amp;rdquo; do</span>
+</span><span class='line'><span class="sr">  action[:enable,:start]</span>
+</span><span class='line'><span class="sr">end</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>You can also access data bag data through the search() interface, which you can read about on the opscode wiki.</p>
+
+<h3>Step Four : uploading the cookbook to chef-server</h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife cookbook upload ntp
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h2> Understanding Idempotence and Convergence </h2>
+
+
+<p>We’re not quite done yet. Let’s SSH into our shiny new NTP enabled machine and go poking about.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>grep server /etc/ntp.conf <span class="p">|</span> head -n 1
+</span><span class='line'>server time.nist.gov
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Wait a sec, isn’t that supposed to be “us.pool.ntp.org”? Not yet. We haven’t enabled our convergence mechanism yet! If we manually run chef-client on the node, we will indeed see that the file has changed.</p>
+
+<h3> Convergence </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>&lt;/p&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;h1&gt;chef-client&lt;/h1&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;p&gt;<span class="nv">$ </span>grep server /etc/ntp.conf <span class="p">|</span> head -n 1
+</span><span class='line'>us.pool.ntp.org
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>That file just converged into the correct state. Lets edit the file again, this time filling it with complete garbage.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>&lt;/p&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;h1&gt;dd <span class="k">if</span><span class="o">=</span>/dev/urandom <span class="nv">of</span><span class="o">=</span>/etc/ntp.conf <span class="nv">bs</span><span class="o">=</span><span class="m">128</span> <span class="nv">count</span><span class="o">=</span>1&lt;/h1&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;h1&gt;chef-client&lt;/h1&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;p&gt;<span class="nv">$ </span>grep server /etc/ntp.conf <span class="p">|</span> head -n 1
+</span><span class='line'>us.pool.ntp.org
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Again, the file converged into the correct state. Awesome. Running chef-client by hand on a large cluster of nodes would be a real pain, so it makes sense to set it up automatically. Indeed, often found in a “role[base]” is a “recipe[chef-client]” that configures it to run as a daemon, or from a cron.</p>
+
+<h3> Idempotence </h3>
+
+
+<p>It is safe to run the recipes on the nodes time and time again because resources are written to be idempotent. You may remember from math class that a function f is idempotent if, for all values of x, f(f(x))=f(x). That means you can run a function over a resource a bajillion times and it will behave as if it was only done once.</p>
+
+<p>This is implemented under the hood as “If it ain’t broke, don’t fix it.” In a file resource, checksums are calculated and compared. In a package resource, the rpm or dpkg databases are consulted to see if the package is installed. The effect of this is that most chef-client runs do absolutely nothing to resources. That is, until you change the function by altering the inputs to the resource providers.</p>
+
+<h2> Notifications and Subscriptions </h2>
+
+
+<p>Further examination reveals that the ntpd service is still talking to “time.nist.gov”. This is because during the chef-client run, the resource named “ntpd” ran it’s idempotency check, and found that it was, in fact, running. It therefore did nothing. It we want ntpd to restart when the contents /etc/ntp.conf are altered, we have to modify our recipe to set up that relation.</p>
+
+<p><figure class='code'><figcaption><span>ntp/recipes/default.rb </span></figcaption>
+<div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+</pre></td><td class='code'><pre><code class='rb'><span class='line'><span class="n">package</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">action</span> <span class="o">[</span><span class="ss">:install</span><span class="o">]</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;ntp_server = data_bag_item(&amp;lsquo;ntp&amp;rsquo;, &amp;lsquo;default_server&amp;rsquo;)&lt;/</span><span class="nb">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="nb">p</span><span class="o">&gt;</span><span class="n">template</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">/</span><span class="n">etc</span><span class="o">/</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="n">source</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">ntp</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">erb</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">variables</span><span class="p">(</span> <span class="ss">:ntp_server</span> <span class="o">=&gt;</span> <span class="n">ntp_server</span><span class="o">[&amp;</span><span class="n">lsquo</span><span class="p">;</span><span class="n">value</span><span class="o">&amp;</span><span class="n">rsquo</span><span class="p">;</span><span class="o">]</span> <span class="p">)</span>
+</span><span class='line'>  <span class="n">notifies</span> <span class="ss">:restart</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">service</span><span class="o">[</span><span class="n">ntpd</span><span class="o">]&amp;</span><span class="n">rdquo</span><span class="p">;</span>
+</span><span class='line'><span class="k">end</span><span class="o">&lt;</span><span class="sr">/p&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="sr">&lt;p&gt;service &amp;ldquo;ntpd&amp;rdquo; do</span>
+</span><span class='line'><span class="sr">  action[:enable,:start]</span>
+</span><span class='line'><span class="sr">end</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Alternatively, we could have set up the “service[ntpd]” resource to subscribe to the “template[/etc/ntp.conf]” resource.</p>
+
+<p>Upload the modified ntp cookbook to chef-server and re-run the client on your demo server to check your work.
+<figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>&lt;/p&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;h1&gt;chef-client&lt;/h1&gt;
+</span><span class='line'>
+</span><span class='line'>&lt;p&gt;<span class="nv">$ </span>lsof -i <span class="p">|</span> grep ntp <span class="p">|</span> grep pool
+</span><span class='line'>ntpd       <span class="m">5673</span>    ntp   19u  IPv4 <span class="m">12481380</span>      0t0  UDP us.pool.ntp.org:ntp<span class="o">}</span>
+</span></code></pre></td></tr></table></div></figure>
+Winning.</p>
+
+<h2> Bulk Loading data into chef-server </h2>
+
+
+<p>To save yourself from writing crazy for loops on command line like</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="k">for</span> i in &lt;code&gt;ls cookbooks&lt;/code&gt; <span class="p">;</span> <span class="k">do</span> knife cookbook upload <span class="nv">$i</span> <span class="p">;</span> <span class="k">done</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Or even worse,</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="k">for</span> i in &lt;code&gt;ls data_bags&lt;/code&gt; <span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>  <span class="k">for</span> j in &lt;code&gt;ls data_bags/<span class="nv">$i</span>/&lt;/code&gt;<span class="p">;</span> <span class="k">do</span>
+</span><span class='line'>    knife data bag create <span class="nv">$i</span>
+</span><span class='line'>    knife data bag from file <span class="nv">$i</span> data_bags/<span class="nv">$i</span>/<span class="nv">$j</span> <span class="p">;</span>
+</span><span class='line'>  <span class="k">done</span> <span class="p">;</span>
+</span><span class='line'><span class="k">done</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>&hellip; somebody was nice enough to write some rake tasks. List them with rake -T, and then install your repo in chef-server with &ldquo;rake install&rdquo;</p>
+
+<h2> Viewing your Infrastructure </h2>
+
+
+<p>There are two ways to view your infrastructure. The first is through the management console, and the other is from knife. Here is a list of handy commands to get you started.</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife node list
+</span><span class='line'>knife node show foo.example.net
+</span><span class='line'>knife data bag list
+</span><span class='line'>knife data bag show whatever
+</span></code></pre></td></tr></table></div></figure></p>
+
+<h2> Deleting Clients, Nodes, and Machines </h2>
+
+
+<p>Remember that nodes, their client certificates, and the machines they’re associated with are three separate entities.</p>
+
+<h3> Nodes </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife node delete foo.example.net
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>This just deletes the node object from chef-server. The next time the machine runs chef-client, the node object will be recreated in chef-server. This node object will have an empty run list what will have to be repopulated before chef-client actually does anything.</p>
+
+<h3> Clients </h3>
+
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'><span class="nv">$ </span>knife client delete foo.example.net
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>This deletes a node object’s associated public key from chef-server. The next time the machine runs chef-client, it will get a permission denied error. If this is done on accident, ssh into the machine, delete it’s client key at /etc/chef/client.pem and re-run chef-client.</p>
+
+<h3> Machines </h3>
+
+
+<p>Deleting a machine will be specific to how it was provisioned. On AWS, it would look like “knife ec2 server delete i-DEAFBEEF”. On a VMware cluster, it could be by clicking buttons in a GUI. I once deleted a hardware machine by throwing it off a balcony. YMMV.</p>
+
+<h2> nodes.sh </h2>
+
+
+<p>I like to keep a special directory called “infrastructures” that contain sub-directories and nodes.sh files. A nodes.sh contains a list of knife commands that can be thought of as the highest level view of the infrastructure. for example:</p>
+
+<p><figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='sh'><span class='line'>knife bootstrap 10.0.0.10 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>database<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span>  -N database-01.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.11 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>database<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N database-02.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.14 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>redis<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N redis01.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.15 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>redis<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N redis02.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.14 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>files<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N files01.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.15 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>files<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N files02.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.16 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>appdemo<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N appdemo01.example.net -x root -d my-fedora13
+</span><span class='line'>knife bootstrap 10.0.0.17 -r <span class="p">&amp;</span>lsquo<span class="p">;</span>role<span class="o">[</span>appdemo<span class="o">]</span><span class="p">&amp;</span>rsquo<span class="p">;</span> -N appdemo02.example.net -x root -d my-fedora13
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>This file can eventually be used to bring up entire infrastructures, but during development, lines are typically pasted into a terminal individually.</p>
+
+<p>This is as close as I’ve gotten to replacing myself with a very small shell script so far. Many a sysadmin has been pursuing this for a long time now. It is here. The journey has just begun.</p>
+
+<p>-s</p>
+]]></content>
+  </entry>
+  
+</feed>
